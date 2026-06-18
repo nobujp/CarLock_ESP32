@@ -245,14 +245,14 @@ class RxCallbacks : public BLECharacteristicCallbacks {
         // 自動アンロック設定
         if (cmd == "AUTOUNLOCK:ON") {
             autoUnlockEnabled = true;
-            prefs.putBool("auOn", true);
+            prefs.putBool("auOn2", true);
             sendBLE("AUTOUNLOCK:ON");
             return;
         }
         if (cmd == "AUTOUNLOCK:OFF") {
             autoUnlockEnabled = false;
             autoUnlockPending = false;
-            prefs.putBool("auOn", false);
+            prefs.putBool("auOn2", false);
             sendBLE("AUTOUNLOCK:OFF");
             return;
         }
@@ -274,9 +274,9 @@ void setup() {
 
     prefs.begin("carlock", false);
     pinCode         = prefs.getString("pin", "1234");
-    autoLockEnabled   = prefs.getBool("alOn", false);
+    autoLockEnabled   = prefs.getBool("alOn",  false);
     autoLockDelay     = (unsigned long)prefs.getInt("alSec", 30) * 1000UL;
-    autoUnlockEnabled = prefs.getBool("auOn", false);
+    autoUnlockEnabled = prefs.getBool("auOn2", true);   // デフォルトON
 
     Serial.println("PIN: " + pinCode);
     Serial.println("自動ロック:   " + String(autoLockEnabled   ? "ON" : "OFF") +
