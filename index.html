@@ -278,6 +278,70 @@
   }
   .pin-send-btn:disabled { opacity: 0.4; cursor: default; }
 
+  /* 自動ロック設定 */
+  .autolock-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 10px;
+  }
+  .autolock-box > label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .toggle-row span { font-size: 15px; font-weight: 600; }
+  .toggle {
+    position: relative;
+    width: 52px; height: 30px;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border);
+    border-radius: 30px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 24px; height: 24px;
+    left: 3px; top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+  .delay-select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 15px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    outline: none;
+  }
+  .autolock-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+
   /* ── 初回接続ガイド ── */
   .connect-guide {
     position: fixed; inset: 0;
@@ -378,7 +442,7 @@ let connecting = false;
 // ══════════════════════════════════════════
 //  車プロファイル (localStorage)
 // ══════════════════════════════════════════
-const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234' }];
+const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30 }];
 let cars   = JSON.parse(localStorage.getItem('cl_cars') || 'null') || DEFAULT_CARS;
 let curIdx = parseInt(localStorage.getItem('cl_cur') || '0');
 if (curIdx >= cars.length) curIdx = 0;
@@ -442,6 +506,10 @@ async function setupConnection(dev) {
       cars[curIdx].pin = newPin;
       saveCars();
       log('✅ PINを ' + newPin + ' に変更・保存しました');
+    }
+    // 自動ロック実行通知
+    if (msg === 'AUTO_LOCKED') {
+      log('🔒 自動ロック実行');
     }
   });
   setStatus('s-connected', '● 接続済: ' + cur().name);
@@ -565,6 +633,28 @@ async function send(cmd) {
   }
 }
 
+async function sendAutoLockSettings(carIdx) {
+  if (!rxChar || !connected) { alert('先に接続してください'); return; }
+  const enabled = document.getElementById('al'+carIdx).checked;
+  const sec     = document.getElementById('ald'+carIdx).value;
+  const pin     = cars[carIdx].pin;
+  try {
+    // ON/OFF設定を送信
+    await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOLOCK:' + (enabled ? 'ON' : 'OFF')));
+    await new Promise(r => setTimeout(r, 300));
+    // 遅延時間を送信
+    await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOLOCK:DELAY:' + sec));
+    // スマホ側の設定を保存
+    cars[carIdx].autoLock    = enabled;
+    cars[carIdx].autoLockSec = parseInt(sec);
+    saveCars();
+    log('自動ロック: ' + (enabled ? 'ON / ' + sec + '秒' : 'OFF') + ' → デバイスに設定しました');
+  } catch(e) {
+    log('送信失敗');
+    onDrop();
+  }
+}
+
 async function changeDevicePin(carIdx) {
   if (!rxChar || !connected) { alert('先に接続してください'); return; }
   const newPin = document.getElementById('np'+carIdx).value.trim();
@@ -622,12 +712,30 @@ function renderCards() {
           <button class="pin-send-btn" onclick="changeDevicePin(${i})" ${!connected?'disabled':''}>変更する</button>
         </div>
       </div>
+      <div class="autolock-box">
+        <label>🚗 自動ロック設定（接続中のみ有効）</label>
+        <div class="toggle-row">
+          <span>自動ロック</span>
+          <label class="toggle">
+            <input type="checkbox" id="al${i}" ${c.autoLock?'checked':''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <select class="delay-select" id="ald${i}">
+          <option value="5"  ${c.autoLockSec==5 ?'selected':''}>5秒（敏感）</option>
+          <option value="15" ${c.autoLockSec==15?'selected':''}>15秒</option>
+          <option value="30" ${c.autoLockSec==30||!c.autoLockSec?'selected':''}>30秒（標準）</option>
+          <option value="60" ${c.autoLockSec==60?'selected':''}>60秒（緩やか）</option>
+        </select>
+        <p class="autolock-note">スマホを持って車を離れると自動でロックします。<br>BLE通信が切れてから選んだ時間後にロックします。</p>
+        <button class="pin-send-btn" onclick="sendAutoLockSettings(${i})" ${!connected?'disabled':''}>デバイスに設定する</button>
+      </div>
     </div>
   `).join('');
 }
 
 function addCar() {
-  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234' });
+  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30 });
   renderCards();
 }
 
