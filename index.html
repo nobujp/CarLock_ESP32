@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0d1117">
+<title>CarLock</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  :root {
+    --bg:       #0d1117;
+    --card:     #161b22;
+    --border:   #30363d;
+    --accent:   #1f6feb;
+    --red:      #da3633;
+    --green:    #238636;
+    --yellow:   #9e6a03;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── ヘッダー ── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px 10px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+  }
+  .car-select {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 600;
+    padding: 10px 12px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238b949e' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  .icon-btn {
+    width: 44px; height: 44px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-size: 20px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* ── ステータスバー ── */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-bottom: 1px solid var(--border);
+  }
+  .status-bar:active { background: var(--card); }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .s-connected    .dot { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+  .s-connecting   .dot { background: #d29922; animation: pulse 1s infinite; }
+  .s-disconnected .dot { background: var(--muted); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* ── メインコントロール ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 20px 16px;
+    gap: 16px;
+  }
+
+  .btn-row { display: flex; gap: 14px; }
+
+  .ctrl-btn {
+    flex: 1;
+    padding: 0;
+    border: none;
+    border-radius: 18px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: transform 0.1s, opacity 0.1s;
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .ctrl-btn:active  { transform: scale(0.94); }
+  .ctrl-btn:disabled{ opacity: 0.3; cursor: default; transform: none; }
+
+  .ctrl-btn .icon  { font-size: 48px; line-height: 1; }
+  .ctrl-btn .label { font-size: 18px; font-weight: 700; color: #fff; }
+
+  .btn-lock    { background: linear-gradient(145deg, #c0392b, #e74c3c); }
+  .btn-unlock  { background: linear-gradient(145deg, #1a7a3c, #27ae60); }
+
+  .btn-hazard {
+    aspect-ratio: auto;
+    padding: 22px;
+    flex-direction: row;
+    gap: 14px;
+    background: linear-gradient(145deg, #8a6100, #f39c12);
+  }
+  .btn-hazard .icon  { font-size: 36px; }
+  .btn-hazard .label { font-size: 22px; }
+
+  /* ── ログ ── */
+  .log-area {
+    margin: 0 16px 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'Courier New', monospace;
+    height: 56px;
+    overflow-y: auto;
+    line-height: 1.6;
+  }
+
+  /* ── 設定パネル ── */
+  .panel-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.6);
+    z-index: 200;
+    align-items: flex-end;
+  }
+  .panel-overlay.open { display: flex; }
+
+  .panel {
+    width: 100%;
+    max-height: 90dvh;
+    background: var(--card);
+    border-radius: 20px 20px 0 0;
+    padding: 20px 16px 40px;
+    overflow-y: auto;
+  }
+  .panel-handle {
+    width: 40px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 0 auto 20px;
+  }
+  .panel h2 { font-size: 18px; margin-bottom: 16px; }
+
+  .car-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .car-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .car-card-header span { font-weight: 600; }
+  .del-btn {
+    background: none; border: none;
+    color: var(--red); font-size: 20px; cursor: pointer; padding: 4px;
+  }
+
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .field input {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 15px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .field input:focus { border-color: var(--accent); }
+
+  .add-btn {
+    width: 100%;
+    padding: 14px;
+    background: none;
+    border: 1px dashed var(--accent);
+    border-radius: 12px;
+    color: var(--accent);
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  .save-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--accent);
+    border: none;
+    border-radius: 12px;
+    color: #fff;
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 16px;
+  }
+
+  /* ── 初回接続ガイド ── */
+  .connect-guide {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 100;
+    padding: 40px;
+    text-align: center;
+  }
+  .connect-guide .car-icon { font-size: 80px; }
+  .connect-guide h1 { font-size: 28px; }
+  .connect-guide p  { color: var(--muted); font-size: 15px; line-height: 1.6; }
+  .connect-start-btn {
+    padding: 18px 48px;
+    background: var(--accent);
+    border: none;
+    border-radius: 16px;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  .connect-guide.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<!-- 初回接続ガイド -->
+<div class="connect-guide" id="guide">
+  <div class="car-icon">🚗</div>
+  <h1>CarLock</h1>
+  <p>はじめてご利用の方は<br>「接続する」をタップして<br>CarLock-ESP32 を選択してください</p>
+  <button class="connect-start-btn" onclick="firstConnect()">接続する</button>
+</div>
+
+<!-- メイン画面 -->
+<div class="header">
+  <select class="car-select" id="carSel" onchange="onCarChange()"></select>
+  <button class="icon-btn" onclick="openPanel()">⚙️</button>
+</div>
+
+<div class="status-bar s-disconnected" id="statusBar" onclick="onStatusTap()">
+  <div class="dot"></div>
+  <span id="statusTxt">未接続 — タップして接続</span>
+</div>
+
+<div class="main">
+  <div class="btn-row">
+    <button class="ctrl-btn btn-lock"   id="btnL" onclick="send('L')" disabled>
+      <div class="icon">🔒</div>
+      <div class="label">ロック</div>
+    </button>
+    <button class="ctrl-btn btn-unlock" id="btnU" onclick="send('U')" disabled>
+      <div class="icon">🔓</div>
+      <div class="label">解除</div>
+    </button>
+  </div>
+  <button class="ctrl-btn btn-hazard" id="btnH" onclick="send('H')" disabled>
+    <div class="icon">⚠️</div>
+    <div class="label">ハザード</div>
+  </button>
+</div>
+
+<div class="log-area" id="logArea">起動しました</div>
+
+<!-- 設定パネル -->
+<div class="panel-overlay" id="overlay" onclick="onOverlayClick(event)">
+  <div class="panel">
+    <div class="panel-handle"></div>
+    <h2>⚙️ 設定</h2>
+    <div id="carCards"></div>
+    <button class="add-btn" onclick="addCar()">＋ 車を追加</button>
+    <button class="save-btn" onclick="savePanel()">💾 保存する</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  BLE 定数
+// ══════════════════════════════════════════
+const SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+
+// ══════════════════════════════════════════
+//  状態
+// ══════════════════════════════════════════
+let device   = null;
+let rxChar   = null;
+let connected = false;
+let connecting = false;
+
+// ══════════════════════════════════════════
+//  車プロファイル (localStorage)
+// ══════════════════════════════════════════
+const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234' }];
+let cars   = JSON.parse(localStorage.getItem('cl_cars') || 'null') || DEFAULT_CARS;
+let curIdx = parseInt(localStorage.getItem('cl_cur') || '0');
+if (curIdx >= cars.length) curIdx = 0;
+
+function cur() { return cars[curIdx]; }
+function saveCars() { localStorage.setItem('cl_cars', JSON.stringify(cars)); }
+function saveCur()  { localStorage.setItem('cl_cur',  String(curIdx)); }
+
+// ══════════════════════════════════════════
+//  UI ヘルパー
+// ══════════════════════════════════════════
+function setStatus(cls, txt) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + cls;
+  document.getElementById('statusTxt').textContent = txt;
+}
+function setButtons(on) {
+  connected = on;
+  ['btnL','btnU','btnH'].forEach(id => document.getElementById(id).disabled = !on);
+}
+function log(msg) {
+  const el = document.getElementById('logArea');
+  const t  = new Date().toLocaleTimeString();
+  el.innerHTML = `<span>${t} ${msg}</span><br>` + el.innerHTML;
+}
+
+// ══════════════════════════════════════════
+//  セレクター描画
+// ══════════════════════════════════════════
+function renderSel() {
+  const sel = document.getElementById('carSel');
+  sel.innerHTML = cars.map((c,i) =>
+    `<option value="${i}" ${i===curIdx?'selected':''}>${'🚗 '+c.name}</option>`
+  ).join('');
+}
+
+function onCarChange() {
+  curIdx = parseInt(document.getElementById('carSel').value);
+  saveCur();
+  disconnect();
+  setTimeout(tryAutoConnect, 600);
+}
+
+// ══════════════════════════════════════════
+//  BLE 接続
+// ══════════════════════════════════════════
+async function setupConnection(dev) {
+  device = dev;
+  device.addEventListener('gattserverdisconnected', onDrop);
+  const srv  = await device.gatt.connect();
+  const svc  = await srv.getPrimaryService(SVC);
+  rxChar     = await svc.getCharacteristic(RX);
+  const txCh = await svc.getCharacteristic(TX);
+  await txCh.startNotifications();
+  txCh.addEventListener('characteristicvaluechanged', e => {
+    log('受信: ' + new TextDecoder().decode(e.target.value));
+  });
+  setStatus('s-connected', '● 接続済: ' + cur().name);
+  setButtons(true);
+  document.getElementById('guide').classList.add('hidden');
+  log('接続しました: ' + cur().devName);
+}
+
+// 2回目以降: getDevices() で許可済みデバイスに自動接続
+async function tryAutoConnect() {
+  if (connected || connecting) return;
+  if (!navigator.bluetooth) {
+    setStatus('s-disconnected', 'このブラウザは非対応です');
+    return;
+  }
+  if (!navigator.bluetooth.getDevices) return; // 未対応ブラウザはスキップ
+
+  connecting = true;
+  setStatus('s-connecting', '⟳ 自動接続中...');
+  try {
+    const devices = await navigator.bluetooth.getDevices();
+    const found   = devices.find(d => d.name === cur().devName);
+    if (!found) {
+      setStatus('s-disconnected', '未接続 — タップして接続');
+      connecting = false;
+      return;
+    }
+    // 許可済みデバイスが見つかった → 接続
+    await setupConnection(found);
+  } catch(e) {
+    log('自動接続失敗: ' + e.message);
+    setStatus('s-disconnected', '未接続 — タップして接続');
+  }
+  connecting = false;
+}
+
+// 初回: requestDevice でデバイス選択
+async function firstConnect() {
+  if (!navigator.bluetooth) {
+    alert('このブラウザは非対応です。\nAndroid: Chrome / iPhone: Bluefy を使用してください。');
+    return;
+  }
+  connecting = true;
+  setStatus('s-connecting', '⟳ 接続中...');
+  document.getElementById('guide').classList.add('hidden');
+  try {
+    const dev = await navigator.bluetooth.requestDevice({
+      filters: [{ name: cur().devName }],
+      optionalServices: [SVC]
+    });
+    await setupConnection(dev);
+  } catch(e) {
+    log('接続失敗: ' + e.message);
+    setStatus('s-disconnected', '未接続 — タップして接続');
+    document.getElementById('guide').classList.remove('hidden');
+  }
+  connecting = false;
+}
+
+// ステータスバーをタップ
+async function onStatusTap() {
+  if (connected || connecting) return;
+  // 許可済みデバイスを再試行、なければ選択ダイアログ
+  if (navigator.bluetooth.getDevices) {
+    const devices = await navigator.bluetooth.getDevices();
+    const found   = devices.find(d => d.name === cur().devName);
+    if (found) {
+      connecting = true;
+      setStatus('s-connecting', '⟳ 再接続中...');
+      try {
+        await setupConnection(found);
+        connecting = false;
+        return;
+      } catch(e) {}
+      connecting = false;
+    }
+  }
+  // 見つからなければ選択ダイアログ
+  firstConnect();
+}
+
+// 切断ハンドラ
+function onDrop() {
+  setStatus('s-disconnected', '切断 — 再接続中...');
+  setButtons(false);
+  log('切断されました');
+  setTimeout(retryConnect, 2000);
+}
+
+async function retryConnect() {
+  if (connected || !device) return;
+  connecting = true;
+  try {
+    await setupConnection(device);
+  } catch(e) {
+    setStatus('s-disconnected', '未接続 — タップして接続');
+    log('再接続失敗');
+  }
+  connecting = false;
+}
+
+function disconnect() {
+  if (device?.gatt?.connected) device.gatt.disconnect();
+  device = null; rxChar = null;
+  setStatus('s-disconnected', '未接続');
+  setButtons(false);
+}
+
+// ══════════════════════════════════════════
+//  コマンド送信
+// ══════════════════════════════════════════
+async function send(cmd) {
+  if (!rxChar) return;
+  const msg = cur().pin + '-' + cmd;
+  try {
+    await rxChar.writeValue(new TextEncoder().encode(msg));
+    log('送信: ' + msg);
+  } catch(e) {
+    log('送信失敗');
+    onDrop();
+  }
+}
+
+// ══════════════════════════════════════════
+//  設定パネル
+// ══════════════════════════════════════════
+function openPanel() {
+  renderCards();
+  document.getElementById('overlay').classList.add('open');
+}
+function closePanel() {
+  document.getElementById('overlay').classList.remove('open');
+}
+function onOverlayClick(e) {
+  if (e.target === document.getElementById('overlay')) closePanel();
+}
+
+function renderCards() {
+  document.getElementById('carCards').innerHTML = cars.map((c,i) => `
+    <div class="car-card">
+      <div class="car-card-header">
+        <span>🚗 車 ${i+1}</span>
+        ${cars.length > 1
+          ? `<button class="del-btn" onclick="delCar(${i})">🗑</button>`
+          : ''}
+      </div>
+      <div class="field">
+        <label>車の名前（表示名）</label>
+        <input id="n${i}" value="${c.name}" placeholder="マイカー1">
+      </div>
+      <div class="field">
+        <label>BLEデバイス名（ESP32に書いた名前）</label>
+        <input id="d${i}" value="${c.devName}" placeholder="CarLock-ESP32">
+      </div>
+      <div class="field">
+        <label>PINコード</label>
+        <input id="p${i}" type="password" value="${c.pin}" placeholder="1234">
+      </div>
+    </div>
+  `).join('');
+}
+
+function addCar() {
+  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234' });
+  renderCards();
+}
+
+function delCar(i) {
+  if (cars.length <= 1) return;
+  cars.splice(i, 1);
+  if (curIdx >= cars.length) curIdx = 0;
+  renderCards();
+}
+
+function savePanel() {
+  cars.forEach((c,i) => {
+    c.name    = document.getElementById('n'+i).value.trim() || c.name;
+    c.devName = document.getElementById('d'+i).value.trim() || c.devName;
+    c.pin     = document.getElementById('p'+i).value.trim() || c.pin;
+  });
+  saveCars(); saveCur();
+  renderSel();
+  closePanel();
+  log('設定を保存しました');
+}
+
+// ══════════════════════════════════════════
+//  起動
+// ══════════════════════════════════════════
+window.addEventListener('load', () => {
+  renderSel();
+  // 許可済みデバイスがあれば自動接続、なければ初回ガイド表示
+  if (navigator.bluetooth?.getDevices) {
+    navigator.bluetooth.getDevices().then(devs => {
+      const found = devs.find(d => d.name === cur().devName);
+      if (found) {
+        document.getElementById('guide').classList.add('hidden');
+        tryAutoConnect();
+      }
+      // なければガイド表示のまま
+    });
+  }
+});
+</script>
+</body>
+</html>
