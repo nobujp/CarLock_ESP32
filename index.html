@@ -604,7 +604,6 @@ async function retryConnect() {
     await setupConnection(device);
   } catch(e) {
     setStatus('s-disconnected', '未接続 — タップして接続');
-    log('再接続失敗');
   }
   connecting = false;
 }
@@ -778,9 +777,16 @@ window.addEventListener('load', () => {
         document.getElementById('guide').classList.add('hidden');
         tryAutoConnect();
       }
-      // なければガイド表示のまま
     });
   }
+
+  // 未接続のとき4秒ごとに再接続を試みる（Bluetooth ON/OFF対応）
+  setInterval(() => {
+    if (!connected && !connecting) {
+      if (device) retryConnect();
+      else tryAutoConnect();
+    }
+  }, 4000);
 });
 </script>
 </body>
