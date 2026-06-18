@@ -10,9 +10,11 @@
  *       1234-R4             → RELAY_4 (予備)
  *       1234-STATUS         → 状態確認
  *       1234-SETPIN:新PIN   → PINコード変更（4〜8桁）
- *       1234-AUTOLOCK:ON    → 自動ロック有効
- *       1234-AUTOLOCK:OFF   → 自動ロック無効
+ *       1234-AUTOLOCK:ON       → 自動ロック有効
+ *       1234-AUTOLOCK:OFF      → 自動ロック無効
  *       1234-AUTOLOCK:DELAY:30 → 切断後30秒でロック
+ *       1234-AUTOUNLOCK:ON     → 自動アンロック有効（接続2秒後に解錠）
+ *       1234-AUTOUNLOCK:OFF    → 自動アンロック無効
  */
 
 #include <Arduino.h>
@@ -81,9 +83,15 @@ unsigned long feedbackNextToggle = 0;
 
 // 自動ロック
 bool              autoLockEnabled = false;
-unsigned long     autoLockDelay   = 30000UL;  // デフォルト30秒
+unsigned long     autoLockDelay   = 30000UL;
 volatile bool     autoLockPending = false;
 unsigned long     autoLockTime    = 0;
+
+// 自動アンロック（BLE接続2秒後に解錠）
+bool              autoUnlockEnabled = false;
+volatile bool     autoUnlockPending = false;
+unsigned long     autoUnlockTime    = 0;
+#define AUTOUNLOCK_DELAY_MS  2000UL
 
 // ==================== BLE送信 ====================
 void sendBLE(const String& msg) {
@@ -133,12 +141,19 @@ class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pSrv) override {
         deviceConnected  = true;
         failCount        = 0;
-        autoLockPending  = false;  // 再接続で自動ロックキャンセル
-        Serial.println("BLE: 接続 → 自動ロックキャンセル");
+        autoLockPending  = false;  // 自動ロックキャンセル
+        if (autoUnlockEnabled) {
+            autoUnlockPending = true;
+            autoUnlockTime    = millis() + AUTOUNLOCK_DELAY_MS;
+            Serial.println("BLE: 接続 → 2秒後に自動アンロック");
+        } else {
+            Serial.println("BLE: 接続");
+        }
     }
     void onDisconnect(BLEServer* pSrv) override {
-        deviceConnected = false;
-        failCount       = 0;
+        deviceConnected   = false;
+        failCount         = 0;
+        autoUnlockPending = false;  // 自動アンロックキャンセル
         if (autoLockEnabled) {
             autoLockPending = true;
             autoLockTime    = millis() + autoLockDelay;
@@ -227,6 +242,21 @@ class RxCallbacks : public BLECharacteristicCallbacks {
             return;
         }
 
+        // 自動アンロック設定
+        if (cmd == "AUTOUNLOCK:ON") {
+            autoUnlockEnabled = true;
+            prefs.putBool("auOn", true);
+            sendBLE("AUTOUNLOCK:ON");
+            return;
+        }
+        if (cmd == "AUTOUNLOCK:OFF") {
+            autoUnlockEnabled = false;
+            autoUnlockPending = false;
+            prefs.putBool("auOn", false);
+            sendBLE("AUTOUNLOCK:OFF");
+            return;
+        }
+
         // 通常コマンド（GPIO操作はloop()で実行）
         if      (cmd == "L" || cmd == "LOCK")   pendingCmd = 1;
         else if (cmd == "U" || cmd == "UNLOCK")  pendingCmd = 2;
@@ -244,12 +274,14 @@ void setup() {
 
     prefs.begin("carlock", false);
     pinCode         = prefs.getString("pin", "1234");
-    autoLockEnabled = prefs.getBool("alOn", false);
-    autoLockDelay   = (unsigned long)prefs.getInt("alSec", 30) * 1000UL;
+    autoLockEnabled   = prefs.getBool("alOn", false);
+    autoLockDelay     = (unsigned long)prefs.getInt("alSec", 30) * 1000UL;
+    autoUnlockEnabled = prefs.getBool("auOn", false);
 
     Serial.println("PIN: " + pinCode);
-    Serial.println("自動ロック: " + String(autoLockEnabled ? "ON" : "OFF") +
+    Serial.println("自動ロック:   " + String(autoLockEnabled   ? "ON" : "OFF") +
                    " / " + String(autoLockDelay / 1000) + "秒");
+    Serial.println("自動アンロック: " + String(autoUnlockEnabled ? "ON" : "OFF"));
 
     const int relayPins[] = { RELAY_1, RELAY_2, RELAY_3, RELAY_4 };
     for (int pin : relayPins) {
@@ -284,6 +316,13 @@ void setup() {
 // ==================== loop ====================
 void loop() {
     unsigned long now = millis();
+
+    // 自動アンロック タイマー（接続2秒後）
+    if (autoUnlockPending && now >= autoUnlockTime) {
+        autoUnlockPending = false;
+        Serial.println("自動アンロック実行！");
+        activateRelay(RELAY_2, LOCK_PULSE_MS, "AUTO_UNLOCKED");
+    }
 
     // 自動ロック タイマー
     if (autoLockPending && now >= autoLockTime) {

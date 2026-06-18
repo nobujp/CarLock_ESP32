@@ -442,7 +442,7 @@ let connecting = false;
 // ══════════════════════════════════════════
 //  車プロファイル (localStorage)
 // ══════════════════════════════════════════
-const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30 }];
+const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:false }];
 let cars   = JSON.parse(localStorage.getItem('cl_cars') || 'null') || DEFAULT_CARS;
 let curIdx = parseInt(localStorage.getItem('cl_cur') || '0');
 if (curIdx >= cars.length) curIdx = 0;
@@ -507,10 +507,8 @@ async function setupConnection(dev) {
       saveCars();
       log('✅ PINを ' + newPin + ' に変更・保存しました');
     }
-    // 自動ロック実行通知
-    if (msg === 'AUTO_LOCKED') {
-      log('🔒 自動ロック実行');
-    }
+    if (msg === 'AUTO_LOCKED')    log('🔒 自動ロック実行');
+    if (msg === 'AUTO_UNLOCKED')  log('🔓 自動アンロック実行');
   });
   setStatus('s-connected', '● 接続済: ' + cur().name);
   setButtons(true);
@@ -635,20 +633,22 @@ async function send(cmd) {
 
 async function sendAutoLockSettings(carIdx) {
   if (!rxChar || !connected) { alert('先に接続してください'); return; }
-  const enabled = document.getElementById('al'+carIdx).checked;
-  const sec     = document.getElementById('ald'+carIdx).value;
-  const pin     = cars[carIdx].pin;
+  const alEnabled = document.getElementById('al'+carIdx).checked;
+  const auEnabled = document.getElementById('au'+carIdx).checked;
+  const sec       = document.getElementById('ald'+carIdx).value;
+  const pin       = cars[carIdx].pin;
   try {
-    // ON/OFF設定を送信
-    await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOLOCK:' + (enabled ? 'ON' : 'OFF')));
+    await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOLOCK:' + (alEnabled ? 'ON' : 'OFF')));
     await new Promise(r => setTimeout(r, 300));
-    // 遅延時間を送信
     await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOLOCK:DELAY:' + sec));
-    // スマホ側の設定を保存
-    cars[carIdx].autoLock    = enabled;
+    await new Promise(r => setTimeout(r, 300));
+    await rxChar.writeValue(new TextEncoder().encode(pin + '-AUTOUNLOCK:' + (auEnabled ? 'ON' : 'OFF')));
+    cars[carIdx].autoLock    = alEnabled;
     cars[carIdx].autoLockSec = parseInt(sec);
+    cars[carIdx].autoUnlock  = auEnabled;
     saveCars();
-    log('自動ロック: ' + (enabled ? 'ON / ' + sec + '秒' : 'OFF') + ' → デバイスに設定しました');
+    log('設定完了 自動ロック:' + (alEnabled ? 'ON/'+sec+'秒' : 'OFF') +
+        ' 自動アンロック:' + (auEnabled ? 'ON' : 'OFF'));
   } catch(e) {
     log('送信失敗');
     onDrop();
@@ -727,7 +727,14 @@ function renderCards() {
           <option value="30" ${c.autoLockSec==30||!c.autoLockSec?'selected':''}>30秒（標準）</option>
           <option value="60" ${c.autoLockSec==60?'selected':''}>60秒（緩やか）</option>
         </select>
-        <p class="autolock-note">スマホを持って車を離れると自動でロックします。<br>BLE通信が切れてから選んだ時間後にロックします。</p>
+        <div class="toggle-row" style="margin-top:10px;">
+          <span>自動アンロック<br><small style="font-size:11px;color:var(--muted)">接続2秒後に自動解錠</small></span>
+          <label class="toggle">
+            <input type="checkbox" id="au${i}" ${c.autoUnlock?'checked':''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p class="autolock-note">Bluetoothをオンにしてアプリを開くと<br>自動でアンロックします。</p>
         <button class="pin-send-btn" onclick="sendAutoLockSettings(${i})" ${!connected?'disabled':''}>デバイスに設定する</button>
       </div>
     </div>
@@ -735,7 +742,7 @@ function renderCards() {
 }
 
 function addCar() {
-  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30 });
+  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:false });
   renderCards();
 }
 
