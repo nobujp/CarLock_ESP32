@@ -434,10 +434,11 @@ const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 // ══════════════════════════════════════════
 //  状態
 // ══════════════════════════════════════════
-let device   = null;
-let rxChar   = null;
-let connected = false;
-let connecting = false;
+let device      = null;
+let rxChar      = null;
+let connected   = false;
+let connecting  = false;
+let retryCount  = 0;
 
 // ══════════════════════════════════════════
 //  車プロファイル (localStorage)
@@ -593,19 +594,38 @@ async function onStatusTap() {
 function onDrop() {
   setStatus('s-disconnected', '切断 — 再接続中...');
   setButtons(false);
+  retryCount = 0;
   log('切断されました');
-  setTimeout(retryConnect, 2000);
 }
 
 async function retryConnect() {
-  if (connected || !device) return;
+  if (connected || connecting) return;
   connecting = true;
   try {
-    await setupConnection(device);
+    if (device) {
+      await setupConnection(device);
+    } else {
+      await tryAutoConnectOnce();
+    }
+    retryCount = 0;
   } catch(e) {
+    retryCount++;
+    // 3回失敗したら古い参照を破棄→次回getDevices()でフレッシュ取得
+    if (retryCount >= 3) {
+      device = null;
+      rxChar = null;
+      retryCount = 0;
+    }
     setStatus('s-disconnected', '未接続 — タップして接続');
   }
   connecting = false;
+}
+
+// getDevices()で新しい参照を取得して接続（内部用）
+async function tryAutoConnectOnce() {
+  const devices = await navigator.bluetooth.getDevices();
+  const found   = devices.find(d => d.name === cur().devName);
+  if (found) await setupConnection(found);
 }
 
 function disconnect() {
@@ -780,13 +800,10 @@ window.addEventListener('load', () => {
     });
   }
 
-  // 未接続のとき4秒ごとに再接続を試みる（Bluetooth ON/OFF対応）
+  // 未接続のとき3秒ごとに再接続を試みる（Bluetooth ON/OFF対応）
   setInterval(() => {
-    if (!connected && !connecting) {
-      if (device) retryConnect();
-      else tryAutoConnect();
-    }
-  }, 4000);
+    if (!connected && !connecting) retryConnect();
+  }, 3000);
 });
 </script>
 </body>
