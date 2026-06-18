@@ -2,14 +2,14 @@
  * ESP32 4-Relay Car Lock Controller
  * Board : Aideepen ESP32 Relay Module (4ch)
  * Control: BLE (Nordic UART Service)
- * App   : "Serial Bluetooth Terminal" (Android) / "BlueSee" (iOS)
  *
  * コマンド形式: "PINコード-コマンド"
- *   例) 1234-L  → ロック
- *       1234-U  → アンロック
- *       1234-H  → 5秒ハザード
- *       1234-R4 → RELAY_4 (予備)
- *       1234-STATUS → 状態確認
+ *   例) 1234-L        → ロック
+ *       1234-U        → アンロック
+ *       1234-H        → 5秒ハザード
+ *       1234-R4       → RELAY_4 (予備)
+ *       1234-STATUS   → 状態確認
+ *       1234-SETPIN:新PIN → PINコード変更（4〜8桁）
  */
 
 #include <Arduino.h>
@@ -17,12 +17,11 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include <Preferences.h>
 
 // ==================== 設定 ====================
 
 #define BLE_DEVICE_NAME  "CarLock-ESP32"
-
-const String PIN_CODE = "1234";
 
 #define RELAY_1  23
 #define RELAY_2   5
@@ -36,19 +35,32 @@ const String PIN_CODE = "1234";
 #define HAZARD_5SEC_MS   5000
 #define HAZARD_BLINK_MS   500
 
+#define MAX_FAIL        3       // 何回失敗でロックアウト
+#define LOCKOUT_MS  60000UL     // ロックアウト時間（60秒）
+
 // ===============================================
 
 #define SERVICE_UUID            "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_RX  "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX  "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 
-BLEServer*         pServer           = nullptr;
-BLECharacteristic* pTxCharacteristic = nullptr;
-bool               deviceConnected   = false;
+Preferences         prefs;
+String              pinCode;
+
+BLEServer*          pServer           = nullptr;
+BLECharacteristic*  pTxCharacteristic = nullptr;
+bool                deviceConnected   = false;
+
+// セキュリティ
+int           failCount    = 0;
+unsigned long lockoutUntil = 0;
 
 // BLEコールバック→loop()へのコマンド受け渡し用フラグ
-// (BLEタスクからdirectlyにGPIOを操作しないため)
-volatile int pendingCmd = 0;  // 0=なし 1=L 2=U 3=H 4=R4 9=STATUS
+volatile int pendingCmd = 0;
+
+// PINコード変更（loop()で処理するため文字列も渡す）
+volatile bool pendingSetPin = false;
+String        pendingNewPin = "";
 
 unsigned long relayOffTime = 0;
 int           activeRelay  = -1;
@@ -58,8 +70,7 @@ bool          blinkState      = false;
 unsigned long blinkEndTime    = 0;
 unsigned long blinkNextToggle = 0;
 
-// ロック/アンロック後のハザードフィードバック
-int           feedbackBlinks     = 0;   // 残り点滅回数
+int           feedbackBlinks     = 0;
 bool          feedbackActive     = false;
 bool          feedbackState      = false;
 unsigned long feedbackNextToggle = 0;
@@ -85,13 +96,12 @@ void activateRelay(int pin, unsigned long durationMs, const String& ackMsg) {
     relayOffTime = millis() + durationMs;
     sendBLE(ackMsg);
 
-    // ロック/アンロックと同時にハザードフィードバック開始
     if (pin == RELAY_1 || pin == RELAY_2) {
         feedbackBlinks     = (pin == RELAY_1) ? 1 : 2;
         feedbackActive     = true;
         feedbackState      = true;
         digitalWrite(RELAY_3, RELAY_ON);
-        feedbackNextToggle = millis() + 400;  // 400ms ON
+        feedbackNextToggle = millis() + 400;
     }
 }
 
@@ -112,10 +122,12 @@ void startHazard() {
 class ServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer* pSrv) override {
         deviceConnected = true;
+        failCount = 0;
         Serial.println("BLE: 接続");
     }
     void onDisconnect(BLEServer* pSrv) override {
         deviceConnected = false;
+        failCount = 0;
         Serial.println("BLE: 切断 → 再アドバタイズ");
         pSrv->startAdvertising();
     }
@@ -127,16 +139,52 @@ class RxCallbacks : public BLECharacteristicCallbacks {
         rx.trim();
         Serial.println("RX: " + rx);
 
-        int sep = rx.indexOf('-');
-        if (sep == -1 || rx.substring(0, sep) != PIN_CODE) {
-            sendBLE("ERR:AUTH_FAIL");
+        // ロックアウト中
+        if (millis() < lockoutUntil) {
+            long remain = (long)((lockoutUntil - millis()) / 1000) + 1;
+            sendBLE("ERR:LOCKED " + String(remain) + "sec");
             return;
         }
+
+        int sep = rx.indexOf('-');
+        if (sep == -1) {
+            sendBLE("ERR:FORMAT");
+            return;
+        }
+
+        // PIN認証
+        if (rx.substring(0, sep) != pinCode) {
+            failCount++;
+            int remain = MAX_FAIL - failCount;
+            if (failCount >= MAX_FAIL) {
+                lockoutUntil = millis() + LOCKOUT_MS;
+                failCount = 0;
+                sendBLE("ERR:LOCKED_OUT 60sec");
+                Serial.println("ロックアウト発動！");
+            } else {
+                sendBLE("ERR:AUTH_FAIL あと" + String(remain) + "回");
+            }
+            return;
+        }
+
+        // 認証成功 → 失敗カウントリセット
+        failCount = 0;
 
         String cmd = rx.substring(sep + 1);
         cmd.toUpperCase();
 
-        // GPIO操作はloop()に任せる → フラグをセットするだけ
+        // PINコード変更コマンド（SETPIN:新PIN）
+        if (cmd.startsWith("SETPIN:")) {
+            String newPin = cmd.substring(7);
+            if (newPin.length() >= 4 && newPin.length() <= 8) {
+                pendingNewPin = newPin;
+                pendingSetPin = true;
+            } else {
+                sendBLE("ERR:PIN_LENGTH 4〜8桁");
+            }
+            return;
+        }
+
         if      (cmd == "L" || cmd == "LOCK")   pendingCmd = 1;
         else if (cmd == "U" || cmd == "UNLOCK")  pendingCmd = 2;
         else if (cmd == "H" || cmd == "HAZARD")  pendingCmd = 3;
@@ -150,6 +198,11 @@ class RxCallbacks : public BLECharacteristicCallbacks {
 void setup() {
     Serial.begin(115200);
     Serial.println("\n=== CarLock ESP32 起動 ===");
+
+    // PINをフラッシュから読み込む（初回は"1234"）
+    prefs.begin("carlock", false);
+    pinCode = prefs.getString("pin", "1234");
+    Serial.println("PIN: " + pinCode);
 
     const int relayPins[] = { RELAY_1, RELAY_2, RELAY_3, RELAY_4 };
     for (int pin : relayPins) {
@@ -178,7 +231,6 @@ void setup() {
     pServer->getAdvertising()->start();
 
     Serial.println("BLE アドバタイズ開始: " BLE_DEVICE_NAME);
-    Serial.println("PIN: " + PIN_CODE);
     Serial.println("準備完了 - スマホから接続してください");
 }
 
@@ -186,7 +238,15 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
-    // BLEから受け取ったコマンドをここで実行 (GPIO操作はloop()内のみ)
+    // PINコード変更処理
+    if (pendingSetPin) {
+        pendingSetPin = false;
+        pinCode = pendingNewPin;
+        prefs.putString("pin", pinCode);
+        sendBLE("PIN_CHANGED:" + pinCode);
+        Serial.println("PIN変更: " + pinCode);
+    }
+
     if (pendingCmd != 0) {
         int cmd = pendingCmd;
         pendingCmd = 0;
@@ -212,7 +272,7 @@ void loop() {
             if (!feedbackState) {
                 digitalWrite(RELAY_3, RELAY_ON);
                 feedbackState      = true;
-                feedbackNextToggle = now + 400;  // 400ms ON
+                feedbackNextToggle = now + 400;
             } else {
                 digitalWrite(RELAY_3, RELAY_OFF);
                 feedbackState = false;
@@ -220,7 +280,7 @@ void loop() {
                 if (feedbackBlinks <= 0) {
                     feedbackActive = false;
                 } else {
-                    feedbackNextToggle = now + 400;  // 400ms OFF (次の点滅まで)
+                    feedbackNextToggle = now + 400;
                 }
             }
         }

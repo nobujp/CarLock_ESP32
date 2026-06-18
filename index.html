@@ -236,6 +236,47 @@
     cursor: pointer;
     margin-top: 16px;
   }
+  .pin-change-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 10px;
+  }
+  .pin-change-box label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .pin-change-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .pin-change-row input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 16px;
+    padding: 10px 12px;
+    outline: none;
+  }
+  .pin-change-row input:focus { border-color: var(--accent); }
+  .pin-send-btn {
+    padding: 10px 16px;
+    background: #9e6a03;
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .pin-send-btn:disabled { opacity: 0.4; cursor: default; }
 
   /* ── 初回接続ガイド ── */
   .connect-guide {
@@ -393,7 +434,15 @@ async function setupConnection(dev) {
   const txCh = await svc.getCharacteristic(TX);
   await txCh.startNotifications();
   txCh.addEventListener('characteristicvaluechanged', e => {
-    log('受信: ' + new TextDecoder().decode(e.target.value));
+    const msg = new TextDecoder().decode(e.target.value);
+    log('受信: ' + msg);
+    // PIN変更成功 → スマホのPINも自動更新
+    if (msg.startsWith('PIN_CHANGED:')) {
+      const newPin = msg.split(':')[1];
+      cars[curIdx].pin = newPin;
+      saveCars();
+      log('✅ PINを ' + newPin + ' に変更・保存しました');
+    }
   });
   setStatus('s-connected', '● 接続済: ' + cur().name);
   setButtons(true);
@@ -516,6 +565,21 @@ async function send(cmd) {
   }
 }
 
+async function changeDevicePin(carIdx) {
+  if (!rxChar || !connected) { alert('先に接続してください'); return; }
+  const newPin = document.getElementById('np'+carIdx).value.trim();
+  if (newPin.length < 4 || newPin.length > 8) {
+    alert('PINは4〜8桁の数字にしてください'); return;
+  }
+  const msg = cars[carIdx].pin + '-SETPIN:' + newPin;
+  try {
+    await rxChar.writeValue(new TextEncoder().encode(msg));
+    log('PIN変更を送信: → ' + newPin);
+  } catch(e) {
+    log('送信失敗');
+  }
+}
+
 // ══════════════════════════════════════════
 //  設定パネル
 // ══════════════════════════════════════════
@@ -548,8 +612,15 @@ function renderCards() {
         <input id="d${i}" value="${c.devName}" placeholder="CarLock-ESP32">
       </div>
       <div class="field">
-        <label>PINコード</label>
+        <label>PINコード（スマホに保存）</label>
         <input id="p${i}" type="password" value="${c.pin}" placeholder="1234">
+      </div>
+      <div class="pin-change-box">
+        <label>🔐 デバイスのPINを変更（接続中のみ有効）</label>
+        <div class="pin-change-row">
+          <input id="np${i}" type="number" placeholder="新しいPIN（4〜8桁）" maxlength="8">
+          <button class="pin-send-btn" onclick="changeDevicePin(${i})" ${!connected?'disabled':''}>変更する</button>
+        </div>
       </div>
     </div>
   `).join('');
