@@ -410,7 +410,7 @@
   </button>
 </div>
 
-<div class="log-area" id="logArea">起動しました [v11]</div>
+<div class="log-area" id="logArea">起動しました [v12]</div>
 
 <!-- 設定パネル -->
 <div class="panel-overlay" id="overlay" onclick="onOverlayClick(event)">
@@ -494,10 +494,10 @@ async function setupConnection(dev) {
   device = dev;
   device.removeEventListener('gattserverdisconnected', onDrop);
   device.addEventListener('gattserverdisconnected', onDrop);
-  // 10秒でタイムアウト（接続がハングする場合の対策）
+  // 30秒でタイムアウト（BT ON後のBLEスタック再初期化に時間がかかる場合の対策）
   const srv = await Promise.race([
     device.gatt.connect(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('接続タイムアウト')), 10000))
+    new Promise((_, rej) => setTimeout(() => rej(new Error('接続タイムアウト')), 30000))
   ]);
   const svc  = await srv.getPrimaryService(SVC);
   rxChar     = await svc.getCharacteristic(RX);
@@ -827,27 +827,41 @@ window.addEventListener('load', () => {
     });
   }
 
-  // BluetoothがONになった瞬間に即座に再接続
-  if (navigator.bluetooth) {
-    navigator.bluetooth.addEventListener('availabilitychanged', (e) => {
-      log('Bluetooth ' + (e.value ? 'ON' : 'OFF'));
-      if (e.value && !connected && !connecting) {
-        device = null; rxChar = null;
-        setTimeout(retryConnect, 500);
+  // 2秒ごと: BTのON/OFFを確認して接続管理
+  let polling = false;
+  setInterval(async () => {
+    if (polling) return;
+    polling = true;
+    try {
+      if (navigator.bluetooth?.getAvailability) {
+        const btOn = await navigator.bluetooth.getAvailability();
+        if (!btOn && connected) {
+          // BTがOFFなのに接続済みフラグが残っている → リセット
+          log('BT OFF確認 → リセット');
+          device = null; rxChar = null;
+          setButtons(false);
+        }
       }
-    });
-  }
-
-  // 2秒ごとに未接続なら再接続
-  setInterval(() => {
+    } catch(e) {}
+    polling = false;
     if (!connected && !connecting) retryConnect();
   }, 2000);
 
   // アプリが前面に戻ったとき
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !connected && !connecting) {
-      log('前面復帰 → 再接続試みます');
-      setTimeout(retryConnect, 500);
+  document.addEventListener('visibilitychange', async () => {
+    if (!document.hidden) {
+      if (navigator.bluetooth?.getAvailability) {
+        const btOn = await navigator.bluetooth.getAvailability();
+        if (!btOn && connected) {
+          log('前面復帰: BT OFF → リセット');
+          device = null; rxChar = null;
+          setButtons(false);
+        }
+      }
+      if (!connected && !connecting) {
+        log('前面復帰 → 再接続');
+        setTimeout(retryConnect, 500);
+      }
     }
   });
 });
