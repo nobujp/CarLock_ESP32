@@ -410,7 +410,7 @@
   </button>
 </div>
 
-<div class="log-area" id="logArea">起動しました</div>
+<div class="log-area" id="logArea">起動しました [v9]</div>
 
 <!-- 設定パネル -->
 <div class="panel-overlay" id="overlay" onclick="onOverlayClick(event)">
@@ -619,16 +619,19 @@ function onDrop() {
 async function retryConnect() {
   if (connected || connecting) return;
   connecting = true;
+  log('再接続試行...');
   try {
     if (device) {
+      log('既存デバイスで接続');
       await setupConnection(device);
     } else {
+      log('getDevices()で接続');
       await tryAutoConnectOnce();
     }
     retryCount = 0;
   } catch(e) {
     retryCount++;
-    // 3回失敗したら古い参照を破棄→次回getDevices()でフレッシュ取得
+    log('失敗(' + retryCount + '): ' + e.message);
     if (retryCount >= 3) {
       device = null;
       rxChar = null;
@@ -641,9 +644,19 @@ async function retryConnect() {
 
 // getDevices()で新しい参照を取得して接続（内部用）
 async function tryAutoConnectOnce() {
+  if (!navigator.bluetooth.getDevices) {
+    log('getDevices非対応ブラウザ');
+    return;
+  }
   const devices = await navigator.bluetooth.getDevices();
+  log('getDevices結果: ' + devices.length + '台');
   const found   = devices.find(d => d.name === cur().devName);
-  if (found) await setupConnection(found);
+  if (found) {
+    log('対象デバイス発見 → 接続');
+    await setupConnection(found);
+  } else {
+    log('対象デバイスなし(登録名:' + cur().devName + ')');
+  }
 }
 
 function disconnect() {
@@ -833,11 +846,12 @@ window.addEventListener('load', () => {
   setInterval(() => {
     // GATTが実際は切断済みなのにconnected=trueのまま（切断イベント未着）を修正
     if (connected && device && !device.gatt.connected) {
+      log('⚠ stale接続検出 → リセット');
       device = null; rxChar = null;
       setButtons(false);
     }
     if (!connected && !connecting) retryConnect();
-  }, 1000);
+  }, 3000);
 
   // アプリが前面に戻ってきたとき：実際のGATT状態を確認して再接続
   document.addEventListener('visibilitychange', () => {
