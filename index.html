@@ -825,10 +825,16 @@ window.addEventListener('load', () => {
 
   // アプリが前面に戻ってきたとき即座に再接続（ホーム画面アイコンタップ対応）
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && !connected && !connecting) {
-      // device参照はリセットしない（直接再接続するため）
-      rxChar = null;
-      retryConnect();
+    if (!document.hidden) {
+      // GATTの実際の状態とUIの状態がずれている場合（BT OFF→ONで切断イベントが来なかった場合）を修正
+      if (connected && device && !device.gatt.connected) {
+        setButtons(false);
+      }
+      if (!connected && !connecting) {
+        device = null;
+        rxChar  = null;
+        retryConnect();
+      }
     }
   });
 });
