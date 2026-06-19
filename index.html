@@ -829,22 +829,25 @@ window.addEventListener('load', () => {
     });
   }
 
-  // 未接続のとき1秒ごとに再接続を試みる
+  // 1秒ごと：GATTの実際の状態確認 + 未接続なら再接続
   setInterval(() => {
+    // GATTが実際は切断済みなのにconnected=trueのまま（切断イベント未着）を修正
+    if (connected && device && !device.gatt.connected) {
+      device = null; rxChar = null;
+      setButtons(false);
+    }
     if (!connected && !connecting) retryConnect();
   }, 1000);
 
-  // アプリが前面に戻ってきたとき即座に再接続（ホーム画面アイコンタップ対応）
+  // アプリが前面に戻ってきたとき：実際のGATT状態を確認して再接続
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-      // GATTの実際の状態とUIの状態がずれている場合（BT OFF→ONで切断イベントが来なかった場合）を修正
-      if (connected && device && !device.gatt.connected) {
+      const actuallyConnected = device?.gatt?.connected === true;
+      if (!actuallyConnected) {
+        // 実際は切断されている（BTオフ等）→ 状態を完全リセットして再接続
+        device = null; rxChar = null;
         setButtons(false);
-      }
-      if (!connected && !connecting) {
-        device = null;
-        rxChar  = null;
-        retryConnect();
+        setTimeout(retryConnect, 500);
       }
     }
   });
