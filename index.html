@@ -443,7 +443,7 @@ let retryCount  = 0;
 // ══════════════════════════════════════════
 //  車プロファイル (localStorage)
 // ══════════════════════════════════════════
-const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:false }];
+const DEFAULT_CARS = [{ name:'マイカー1', devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:true }];
 let cars   = JSON.parse(localStorage.getItem('cl_cars') || 'null') || DEFAULT_CARS;
 let curIdx = parseInt(localStorage.getItem('cl_cur') || '0');
 if (curIdx >= cars.length) curIdx = 0;
@@ -774,7 +774,7 @@ function renderCards() {
 }
 
 function addCar() {
-  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:false });
+  cars.push({ name:'マイカー'+(cars.length+1), devName:'CarLock-ESP32', pin:'1234', autoLock:false, autoLockSec:30, autoUnlock:true });
   renderCards();
 }
 
