@@ -374,12 +374,12 @@
 </head>
 <body>
 
-<!-- 初回接続ガイド -->
+<!-- 初回接続ガイド / 切断後再接続 -->
 <div class="connect-guide" id="guide">
   <div class="car-icon">🚗</div>
-  <h1>CarLock</h1>
-  <p>はじめてご利用の方は<br>「接続する」をタップして<br>CarLock-ESP32 を選択してください</p>
-  <button class="connect-start-btn" onclick="firstConnect()">接続する</button>
+  <h1 id="guideTitle">CarLock</h1>
+  <p id="guideTxt">はじめてご利用の方は<br>「接続する」をタップして<br>CarLock-ESP32 を選択してください</p>
+  <button class="connect-start-btn" id="guideBtn" onclick="onConnectBtnTap()">接続する</button>
 </div>
 
 <!-- メイン画面 -->
@@ -410,7 +410,7 @@
   </button>
 </div>
 
-<div class="log-area" id="logArea">起動しました [v12]</div>
+<div class="log-area" id="logArea">起動しました [v13]</div>
 
 <!-- 設定パネル -->
 <div class="panel-overlay" id="overlay" onclick="onOverlayClick(event)">
@@ -610,10 +610,35 @@ async function onStatusTap() {
 
 // 切断ハンドラ
 function onDrop() {
-  setStatus('s-disconnected', '切断 — 再接続中...');
   setButtons(false);
-  retryCount = 0;
-  log('切断されました');
+  setStatus('s-disconnected', '切断');
+  log('切断 → 解錠ボタンをタップしてください');
+  // 大きい解錠ボタンを表示
+  document.getElementById('guideTitle').textContent = '接続が切れました';
+  document.getElementById('guideTxt').textContent = 'Bluetoothをオンにして\n「解錠」をタップしてください';
+  document.getElementById('guideBtn').textContent = '解錠（再接続）';
+  document.getElementById('guide').classList.remove('hidden');
+}
+
+// ガイドボタン共通ハンドラ
+async function onConnectBtnTap() {
+  document.getElementById('guide').classList.add('hidden');
+  // getDevices()で試行、なければ requestDevice()
+  if (navigator.bluetooth.getDevices) {
+    const devs = await navigator.bluetooth.getDevices();
+    const found = devs.find(d => d.name === cur().devName);
+    if (found) {
+      connecting = true;
+      setStatus('s-connecting', '⟳ 接続中...');
+      try {
+        await setupConnection(found);
+        connecting = false;
+        return;
+      } catch(e) {}
+      connecting = false;
+    }
+  }
+  firstConnect(); // requestDevice()にフォールバック
 }
 
 async function retryConnect() {
@@ -827,41 +852,15 @@ window.addEventListener('load', () => {
     });
   }
 
-  // 2秒ごと: BTのON/OFFを確認して接続管理
-  let polling = false;
-  setInterval(async () => {
-    if (polling) return;
-    polling = true;
-    try {
-      if (navigator.bluetooth?.getAvailability) {
-        const btOn = await navigator.bluetooth.getAvailability();
-        if (!btOn && connected) {
-          // BTがOFFなのに接続済みフラグが残っている → リセット
-          log('BT OFF確認 → リセット');
-          device = null; rxChar = null;
-          setButtons(false);
-        }
-      }
-    } catch(e) {}
-    polling = false;
+  // 3秒ごとに未接続なら再接続試行（シンプル版）
+  setInterval(() => {
     if (!connected && !connecting) retryConnect();
-  }, 2000);
+  }, 3000);
 
   // アプリが前面に戻ったとき
-  document.addEventListener('visibilitychange', async () => {
-    if (!document.hidden) {
-      if (navigator.bluetooth?.getAvailability) {
-        const btOn = await navigator.bluetooth.getAvailability();
-        if (!btOn && connected) {
-          log('前面復帰: BT OFF → リセット');
-          device = null; rxChar = null;
-          setButtons(false);
-        }
-      }
-      if (!connected && !connecting) {
-        log('前面復帰 → 再接続');
-        setTimeout(retryConnect, 500);
-      }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !connected && !connecting) {
+      setTimeout(retryConnect, 500);
     }
   });
 });
