@@ -410,7 +410,7 @@
   </button>
 </div>
 
-<div class="log-area" id="logArea">起動しました [v14]</div>
+<div class="log-area" id="logArea">起動しました [v15]</div>
 
 <!-- 設定パネル -->
 <div class="panel-overlay" id="overlay" onclick="onOverlayClick(event)">
@@ -610,35 +610,20 @@ async function onStatusTap() {
 
 // 切断ハンドラ
 function onDrop() {
+  device = null; rxChar = null;  // 古い参照を破棄してフレッシュ接続を強制
   setButtons(false);
   setStatus('s-disconnected', '切断');
   log('切断 → 解錠ボタンをタップしてください');
-  // 大きい解錠ボタンを表示
   document.getElementById('guideTitle').textContent = '接続が切れました';
   document.getElementById('guideTxt').textContent = 'Bluetoothをオンにして\n「解錠」をタップしてください';
   document.getElementById('guideBtn').textContent = '解錠（再接続）';
   document.getElementById('guide').classList.remove('hidden');
 }
 
-// ガイドボタン共通ハンドラ
-async function onConnectBtnTap() {
+// ガイドボタン：常にrequestDevice()でフレッシュ接続（Androidキャッシュ回避）
+function onConnectBtnTap() {
   document.getElementById('guide').classList.add('hidden');
-  // getDevices()で試行、なければ requestDevice()
-  if (navigator.bluetooth.getDevices) {
-    const devs = await navigator.bluetooth.getDevices();
-    const found = devs.find(d => d.name === cur().devName);
-    if (found) {
-      connecting = true;
-      setStatus('s-connecting', '⟳ 接続中...');
-      try {
-        await setupConnection(found);
-        connecting = false;
-        return;
-      } catch(e) {}
-      connecting = false;
-    }
-  }
-  firstConnect(); // requestDevice()にフォールバック
+  firstConnect();
 }
 
 async function retryConnect() {
