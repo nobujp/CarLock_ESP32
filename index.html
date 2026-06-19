@@ -492,8 +492,13 @@ function onCarChange() {
 // ══════════════════════════════════════════
 async function setupConnection(dev) {
   device = dev;
+  device.removeEventListener('gattserverdisconnected', onDrop);
   device.addEventListener('gattserverdisconnected', onDrop);
-  const srv  = await device.gatt.connect();
+  // 10秒でタイムアウト（接続がハングする場合の対策）
+  const srv = await Promise.race([
+    device.gatt.connect(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('接続タイムアウト')), 10000))
+  ]);
   const svc  = await srv.getPrimaryService(SVC);
   rxChar     = await svc.getCharacteristic(RX);
   const txCh = await svc.getCharacteristic(TX);
@@ -821,8 +826,8 @@ window.addEventListener('load', () => {
   // アプリが前面に戻ってきたとき即座に再接続（ホーム画面アイコンタップ対応）
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && !connected && !connecting) {
-      device = null;
-      rxChar  = null;
+      // device参照はリセットしない（直接再接続するため）
+      rxChar = null;
       retryConnect();
     }
   });
