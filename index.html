@@ -515,6 +515,19 @@ async function setupConnection(dev) {
   setButtons(true);
   document.getElementById('guide').classList.add('hidden');
   log('接続しました: ' + cur().devName);
+
+  // 自動アンロック: 接続2秒後にアンロックコマンドを送信
+  if (cur().autoUnlock !== false) {
+    setTimeout(async () => {
+      if (connected && rxChar) {
+        try {
+          const msg = cur().pin + '-U';
+          await rxChar.writeValue(new TextEncoder().encode(msg));
+          log('🔓 自動アンロック送信');
+        } catch(e) {}
+      }
+    }, 2000);
+  }
 }
 
 // 2回目以降: getDevices() で許可済みデバイスに自動接続
