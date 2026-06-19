@@ -818,10 +818,21 @@ window.addEventListener('load', () => {
     });
   }
 
-  // 未接続のとき3秒ごとに再接続を試みる
+  // BluetoothがONになった瞬間に即座に再接続
+  if (navigator.bluetooth) {
+    navigator.bluetooth.addEventListener('availabilitychanged', (e) => {
+      log('Bluetooth ' + (e.value ? 'ON' : 'OFF'));
+      if (e.value && !connected && !connecting) {
+        device = null; rxChar = null;
+        setTimeout(retryConnect, 500);
+      }
+    });
+  }
+
+  // 未接続のとき1秒ごとに再接続を試みる
   setInterval(() => {
     if (!connected && !connecting) retryConnect();
-  }, 3000);
+  }, 1000);
 
   // アプリが前面に戻ってきたとき即座に再接続（ホーム画面アイコンタップ対応）
   document.addEventListener('visibilitychange', () => {
