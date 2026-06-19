@@ -800,10 +800,19 @@ window.addEventListener('load', () => {
     });
   }
 
-  // 未接続のとき3秒ごとに再接続を試みる（Bluetooth ON/OFF対応）
+  // 未接続のとき3秒ごとに再接続を試みる
   setInterval(() => {
     if (!connected && !connecting) retryConnect();
   }, 3000);
+
+  // アプリが前面に戻ってきたとき即座に再接続（ホーム画面アイコンタップ対応）
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !connected && !connecting) {
+      device = null;
+      rxChar  = null;
+      retryConnect();
+    }
+  });
 });
 </script>
 </body>
